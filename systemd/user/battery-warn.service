@@ -1,0 +1,9 @@
+[Unit]
+Description=Battery warning notifier
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash %h/.config/hypr/scripts/battery-warn.sh
+Environment=DISPLAY=:1
+Environment=WAYLAND_DISPLAY=wayland-1
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus

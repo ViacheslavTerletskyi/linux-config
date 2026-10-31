@@ -1,0 +1,22 @@
+# Whitelist: ignore everything, then allow only what is tracked
+/*
+
+!/.gitignore
+!/README.md
+
+# Hyprland (+ scripts/battery-warn.sh)
+!/hypr/
+
+# QuickShell: bar, launcher, notifications, polkit
+!/quickshell/
+
+# Neovim (has its own nvim/.gitignore)
+!/nvim/
+
+# Terminal (TERMINAL in hypr/configs/vars.lua)
+!/kitty/
+
+# User services: battery-warn timer, hyprland-session.target
+!/systemd/
+/systemd/*
+!/systemd/user/

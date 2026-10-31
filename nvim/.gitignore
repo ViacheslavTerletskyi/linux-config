@@ -1,0 +1,101 @@
+# -----------------------------
+# Neovim cache & runtime junk
+# -----------------------------
+
+# Swap files
+*.swp
+*.swo
+
+# Backup files
+*.bak
+*.tmp
+*~
+
+# Session files
+Session.vim
+*.session
+
+# Undodir
+undodir/
+undo/
+
+# Backupdir
+backup/
+backups/
+
+# Viewdir
+view/
+
+# Spell files
+spell/*.spl
+spell/*.sug
+
+# -----------------------------
+# Neovim Plugin Managers
+# -----------------------------
+
+# Packer build & plugin downloads
+plugin/packer_compiled.lua
+packer_compiled.lua
+lua/packer_compiled.lua
+
+# Lazy.nvim state files
+lazy-lock.json
+state.sqlite3
+lazy/
+lua/lazy-lock.json
+
+# Vim-Plug downloaded plugins
+plugged/
+
+# Dein downloads
+dein/
+dein/.cache/
+
+# -----------------------------
+# LSP, Treesitter, Mason
+# -----------------------------
+
+# Mason — installed language servers & tools
+mason/
+lua/mason/
+share/nvim/mason/
+
+# Treesitter parsers
+parser/
+
+# LSP server configs/cache
+lsp.log
+.lsp/
+lsp_servers/
+lsp/
+lua/lsp/
+
+# DAP adapters
+dap/
+
+# -----------------------------
+# Operating System & editor trash
+# -----------------------------
+
+.DS_Store
+Thumbs.db
+
+# -----------------------------
+# If storing ~/.local/share/nvim
+# -----------------------------
+# Entire runtime should be ignored except your init.lua or lua configs
+site/
+rplugin.vim
+shada/
+swap/
+views/
+
+# -----------------------------
+# Allow user runtime configs
+# -----------------------------
+!after/
+!after/**
+
+# Garbage files
+GEMINI.md
