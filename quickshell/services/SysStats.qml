@@ -25,7 +25,9 @@ Singleton {
     property real nvmeTemp: -1
     property string load: ""
     property real uptime: 0
-    property var processes: []       // [{ name, cpu, mem }]
+    property var processes: []       // [{ name, cpu, mem (KiB) }]
+    property string sortBy: "cpu"    // "cpu" | "mem"
+    onSortByChanged: if (detailed) psProc.running = true
 
     readonly property int mem: memTotal > 0 ? Math.round(100 * memUsed / memTotal) : 0
     readonly property int vram: vramTotal > 0 ? Math.round(100 * vramUsed / vramTotal) : -1
@@ -57,6 +59,12 @@ Singleton {
         memUsed = memTotal - (v.MemAvailable ?? 0);
         swapTotal = v.SwapTotal ?? 0;
         swapUsed = swapTotal - (v.SwapFree ?? 0);
+    }
+    // top's RES column: KiB, or scaled with a suffix ("1.1g") when it doesn't fit.
+    function kib(s) {
+        const m = String(s).replace(",", ".").match(/^([\d.]+)([kmgtpe]?)$/i);
+        if (!m) return 0;
+        return Number(m[1]) * Math.pow(1024, "kmgtpe".indexOf((m[2] || "k").toLowerCase()));
     }
     function milli(text) {
         const n = parseInt(text);
@@ -155,7 +163,7 @@ Singleton {
     // Top processes (popup only). Second `top` sample = usage over the last 0.5s.
     Process {
         id: psProc
-        command: ["top", "-b", "-n", "2", "-d", "0.5", "-o", "%CPU", "-w", "512"]
+        command: ["top", "-b", "-n", "2", "-d", "0.5", "-o", root.sortBy === "mem" ? "%MEM" : "%CPU", "-e", "k", "-w", "512"]
         stdout: StdioCollector {
             onStreamFinished: {
                 const lines = text.split("\n");
@@ -166,7 +174,7 @@ Singleton {
                     .map(l => l.trim().split(/\s+/))
                     .filter(p => p.length >= 12 && p[11] !== "top")
                     .slice(0, 6)
-                    .map(p => ({ name: p.slice(11).join(" "), cpu: Number(p[8].replace(",", ".")), mem: Number(p[9].replace(",", ".")) }));
+                    .map(p => ({ name: p.slice(11).join(" "), cpu: Number(p[8].replace(",", ".")), mem: root.kib(p[5]) }));
             }
         }
     }

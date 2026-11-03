@@ -17,11 +17,17 @@ PanelWindow {
     readonly property int handle: 10
 
     // Pointer interaction state
-    property string drag: ""      // create | move | resize | draw
+    property string drag: ""      // create | move | resize | draw | shape
     property string grip: ""      // which handle when resizing: tl t tr r br b bl l
     property var origin: null     // press point
     property var origSel: null
     property var current: null    // shape being drawn
+    property int picked: -1       // index of the shape clicked in select mode (outlined, Delete removes it)
+    property var origShape: null  // shape being moved, before the move
+    property var beforeMove: null // annotations before the move (pushed to undo history if it moved)
+    // Shape under the pointer in select mode
+    readonly property int hovered: hasSel && tool.mode === "select" && drag === "" && mouse.containsMouse
+        ? shapeAt(mouse.mouseX, mouse.mouseY) : -1
 
     // Hovered target in pick mode (screen / window), local coordinates
     // Computed from the polled global cursor position: hover events never reach this surface in Hyprland
@@ -53,7 +59,7 @@ PanelWindow {
 
     Component.onCompleted: keys.forceActiveFocus()
     onVisibleChanged: {
-        drag = ""; current = null; textPos = null;
+        drag = ""; current = null; textPos = null; picked = -1;
         if (visible) keys.forceActiveFocus();
     }
 
@@ -81,6 +87,59 @@ PanelWindow {
         if (px > s.x && px < s.x + s.w && py > s.y && py < s.y + s.h) return "inside";
         return "outside";
     }
+    // ── shapes: hit test, bounds, move ──
+    function segDist(px, py, x1, y1, x2, y2) {
+        const dx = x2 - x1, dy = y2 - y1, len2 = dx * dx + dy * dy;
+        const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / len2)) : 0;
+        return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+    }
+    function shapeHit(a, px, py) {
+        const tol = a.size / 2 + 6;
+        if (a.type === "pen") {
+            for (let i = 1; i < a.points.length; i++)
+                if (segDist(px, py, a.points[i - 1].x, a.points[i - 1].y, a.points[i].x, a.points[i].y) <= tol) return true;
+            return a.points.length === 1 && Math.hypot(px - a.points[0].x, py - a.points[0].y) <= tol;
+        }
+        if (a.type === "line" || a.type === "arrow")
+            return segDist(px, py, a.x1, a.y1, a.x2, a.y2) <= tol;
+        if (a.type === "rect") {
+            // Outline only, so the area inside a rectangle still moves the selection
+            const xs = [a.x1, a.x2, a.x2, a.x1], ys = [a.y1, a.y1, a.y2, a.y2];
+            for (let i = 0; i < 4; i++)
+                if (segDist(px, py, xs[i], ys[i], xs[(i + 1) % 4], ys[(i + 1) % 4]) <= tol) return true;
+            return false;
+        }
+        const b = shapeBounds(a);
+        return px >= b.x && px <= b.x + b.w && py >= b.y && py <= b.y + b.h;
+    }
+    // Topmost shape under a point, -1 = none
+    function shapeAt(px, py) {
+        const list = tool.annotations;
+        for (let i = list.length - 1; i >= 0; i--)
+            if (shapeHit(list[i], px, py)) return i;
+        return -1;
+    }
+    function shapeBounds(a) {
+        if (a.type === "text") return { x: a.x, y: a.y, w: a.w ?? 40, h: a.h ?? textPx(a.size) };
+        const xs = a.type === "pen" ? a.points.map(p => p.x) : [a.x1, a.x2];
+        const ys = a.type === "pen" ? a.points.map(p => p.y) : [a.y1, a.y2];
+        const x = Math.min(...xs), y = Math.min(...ys);
+        return { x: x, y: y, w: Math.max(...xs) - x, h: Math.max(...ys) - y };
+    }
+    function shifted(a, dx, dy) {
+        const b = Object.assign({}, a);
+        if (a.type === "pen") b.points = a.points.map(p => ({ x: p.x + dx, y: p.y + dy }));
+        else if (a.type === "text") { b.x = a.x + dx; b.y = a.y + dy; }
+        else { b.x1 = a.x1 + dx; b.y1 = a.y1 + dy; b.x2 = a.x2 + dx; b.y2 = a.y2 + dy; }
+        return b;
+    }
+    // Shift held: snap a line / arrow end to 45° steps
+    function snapped(x1, y1, x2, y2) {
+        const len = Math.hypot(x2 - x1, y2 - y1);
+        const ang = Math.round(Math.atan2(y2 - y1, x2 - x1) / (Math.PI / 4)) * (Math.PI / 4);
+        return { x: x1 + len * Math.cos(ang), y: y1 + len * Math.sin(ang) };
+    }
+
     function cursorFor(hit) {
         if (tool.mode === "text" && hasSel) return Qt.IBeamCursor;
         if (tool.mode !== "select" && hasSel) return Qt.CrossCursor;
@@ -111,6 +170,7 @@ PanelWindow {
     function claimSelection() {
         if (tool.selScreen !== name) {
             tool.annotations = [];
+            tool.history = [];
             tool.selScreen = name;
         }
         tool.focusScreen = name;
@@ -119,7 +179,8 @@ PanelWindow {
 
     function commitText() {
         if (textPos && editor.text.trim() !== "")
-            tool.addAnnotation({ type: "text", x: textPos.x, y: textPos.y, text: editor.text, color: String(tool.color), size: tool.size });
+            tool.addAnnotation({ type: "text", x: textPos.x, y: textPos.y, text: editor.text, color: String(tool.color), size: tool.size,
+                w: editor.contentWidth, h: editor.contentHeight });
         textPos = null;
         editor.text = "";
         keys.forceActiveFocus();
@@ -147,7 +208,10 @@ PanelWindow {
             }, frame.sourceSize);
         }
         function onCommitTextRequested() { win.commitText(); }
-        function onAnnotationsChanged() { canvas.requestPaint(); }
+        function onAnnotationsChanged() {
+            if (win.picked >= win.tool.annotations.length) win.picked = -1;
+            canvas.requestPaint();
+        }
     }
 
     // ── frozen frame, dimmed ──
@@ -202,6 +266,11 @@ PanelWindow {
                     ctx.stroke();
                 } else if (a.type === "rect") {
                     ctx.strokeRect(Math.min(a.x1, a.x2), Math.min(a.y1, a.y2), Math.abs(a.x2 - a.x1), Math.abs(a.y2 - a.y1));
+                } else if (a.type === "line") {
+                    ctx.beginPath();
+                    ctx.moveTo(a.x1, a.y1);
+                    ctx.lineTo(a.x2, a.y2);
+                    ctx.stroke();
                 } else if (a.type === "arrow") {
                     const ang = Math.atan2(a.y2 - a.y1, a.x2 - a.x1);
                     const head = 10 + a.size * 3;
@@ -232,6 +301,27 @@ PanelWindow {
         }
     }
     function textPx(size) { return 12 + size * 3; }
+
+    // ── outline of the hovered / clicked shape (not part of the saved image) ──
+    Repeater {
+        model: {
+            const list = win.tool.annotations, i = win.drag === "shape" ? win.picked : win.hovered >= 0 ? win.hovered : win.picked;
+            return win.hasSel && win.tool.mode === "select" && i >= 0 && i < list.length ? [list[i]] : [];
+        }
+        delegate: Rectangle {
+            required property var modelData
+            readonly property var b: win.shapeBounds(modelData)
+            readonly property int pad: modelData.size / 2 + 4
+            x: b.x - pad
+            y: b.y - pad
+            width: b.w + pad * 2
+            height: b.h + pad * 2
+            color: Qt.alpha(Theme.blue, 0.08)
+            radius: 4
+            border.width: 1
+            border.color: Theme.blue
+        }
+    }
 
     // ── selection outline, handles, size label ──
     Rectangle {
@@ -317,7 +407,9 @@ PanelWindow {
         id: mouse
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: win.tool.pick !== "" ? Qt.PointingHandCursor : win.cursorFor(win.drag === "resize" ? win.grip : win.drag === "move" ? "inside" : win.hitTest(mouseX, mouseY))
+        cursorShape: win.tool.pick !== "" ? Qt.PointingHandCursor
+            : win.drag === "shape" || win.hovered >= 0 ? Qt.SizeAllCursor
+            : win.cursorFor(win.drag === "resize" ? win.grip : win.drag === "move" ? "inside" : win.hitTest(mouseX, mouseY))
 
         onPressed: m => {
             if (win.tool.pick !== "") {
@@ -347,7 +439,13 @@ PanelWindow {
             }
 
             const hit = win.hitTest(m.x, m.y);
-            if (hit === "inside") {
+            const shape = hit === "inside" || hit === "outside" ? win.shapeAt(m.x, m.y) : -1;
+            win.picked = shape;
+            if (shape >= 0) {
+                win.drag = "shape";
+                win.origShape = win.tool.annotations[shape];
+                win.beforeMove = win.tool.annotations;
+            } else if (hit === "inside") {
                 win.drag = "move";
                 win.origSel = win.sel;
             } else if (hit !== "outside") {
@@ -380,10 +478,17 @@ PanelWindow {
                 if (g.includes("t")) y1 = m.y;
                 if (g.includes("b")) y2 = m.y;
                 win.tool.sel = win.rectFrom(x1, y1, x2, y2);
+            } else if (win.drag === "shape") {
+                const list = win.tool.annotations.slice();
+                list[win.picked] = win.shifted(win.origShape, m.x - o.x, m.y - o.y);
+                win.tool.annotations = list;   // history is pushed once, on release
             } else if (win.drag === "draw" && win.current) {
                 const c = win.current;
                 if (c.type === "pen") c.points.push({ x: m.x, y: m.y });
-                else { c.x2 = m.x; c.y2 = m.y; }
+                else if ((c.type === "line" || c.type === "arrow") && (m.modifiers & Qt.ShiftModifier)) {
+                    const e = win.snapped(c.x1, c.y1, m.x, m.y);
+                    c.x2 = e.x; c.y2 = e.y;
+                } else { c.x2 = m.x; c.y2 = m.y; }
                 canvas.requestPaint();
             }
         }
@@ -396,6 +501,10 @@ PanelWindow {
                 const r = win.windowAt(m.x, m.y);
                 if (r) win.tool.sel = r;
                 else { win.tool.sel = null; win.tool.selScreen = ""; }
+            } else if (win.drag === "shape") {
+                if (tiny) win.tool.annotations = win.beforeMove;   // just a click: keep it exact
+                else win.tool.history = [...win.tool.history, win.beforeMove];
+                win.beforeMove = null;
             } else if (win.drag === "draw" && win.current) {
                 if (!tiny || win.current.type === "pen") win.tool.addAnnotation(win.current);
                 win.current = null;
@@ -404,7 +513,9 @@ PanelWindow {
             win.drag = "";
         }
 
-        onDoubleClicked: if (win.hasSel && win.tool.mode === "select") win.tool.finish()
+        onDoubleClicked: m => {
+            if (win.hasSel && win.tool.mode === "select" && win.shapeAt(m.x, m.y) < 0) win.tool.finish();
+        }
     }
 
     // ── text input placed on the image ──
@@ -440,10 +551,15 @@ PanelWindow {
             const t = win.tool;
             const ctrl = ev.modifiers & Qt.ControlModifier;
             if (ev.key === Qt.Key_Escape) t.cancel();
-            else if (ev.key === Qt.Key_Return || ev.key === Qt.Key_Enter || (ctrl && ev.key === Qt.Key_C) || (ctrl && ev.key === Qt.Key_S)) t.finish();
+            else if (ev.key === Qt.Key_Return || ev.key === Qt.Key_Enter || ev.key === Qt.Key_Space || (ctrl && ev.key === Qt.Key_C) || (ctrl && ev.key === Qt.Key_S)) t.finish();
             else if (ctrl && ev.key === Qt.Key_Z) t.undo();
             else if (ev.key === Qt.Key_V || ev.key === Qt.Key_S) t.mode = "select";
             else if (ev.key === Qt.Key_P || ev.key === Qt.Key_D) t.mode = "pen";
+            else if ((ev.key === Qt.Key_Delete || ev.key === Qt.Key_Backspace) && win.picked >= 0) {
+                t.removeAnnotation(win.picked);
+                win.picked = -1;
+            }
+            else if (ev.key === Qt.Key_L) t.mode = "line";
             else if (ev.key === Qt.Key_A) t.mode = "arrow";
             else if (ev.key === Qt.Key_R) t.mode = "rect";
             else if (ev.key === Qt.Key_T) t.mode = "text";
@@ -480,6 +596,7 @@ PanelWindow {
                 model: [
                     { id: "select", icon: "", tip: "Select / adjust (V)" },
                     { id: "pen", icon: "", tip: "Draw (P)" },
+                    { id: "line", icon: "󰕞", tip: "Line (L)" },
                     { id: "arrow", icon: "", tip: "Arrow (A)" },
                     { id: "rect", icon: "", tip: "Rectangle (R)" },
                     { id: "text", icon: "", tip: "Text (T)" }
@@ -544,7 +661,7 @@ PanelWindow {
 
             ToolButton {
                 icon: ""
-                enabled: win.tool.annotations.length > 0
+                enabled: win.tool.history.length > 0
                 onClicked: win.tool.undo()
             }
             ToolButton {

@@ -5,7 +5,8 @@ import Quickshell.Hyprland
 
 // Region screenshot with editing before saving.
 // Flow: freeze all monitors (grim) → select region / click a window → adjust, draw, add text
-//       → Enter copies to clipboard and saves to ~/Pictures/screenshots.
+//       → Enter / Space copies to clipboard and saves to ~/Pictures/screenshots.
+// Select mode: drag a shape to move it, Delete removes the clicked one. Shift snaps lines / arrows to 45°.
 // Also instant captures without editor: hover and click any monitor / window on any monitor.
 // IPC: qs ipc call screenshot region|screen|window|cancel
 Scope {
@@ -24,10 +25,11 @@ Scope {
     property string selScreen: ""     // monitor the selection is on ("" = none yet)
     property var sel: null            // { x, y, w, h } in that monitor's coordinates
     property var annotations: []      // finished shapes on selScreen
+    property var history: []          // previous `annotations` arrays, for undo (adds, moves, deletes)
 
     property string pick: ""          // "" = region editor | screen | window (click to capture instantly)
     property var cursor: ({ x: -99999, y: -99999 })   // global pointer position, polled while picking
-    property string mode: "select"    // select | pen | arrow | rect | text
+    property string mode: "select"    // select | pen | line | arrow | rect | text
     property color color: "#f38ba8"
     property int size: 4
     readonly property var colors: ["#f38ba8", "#fab387", "#f9e2af", "#a6e3a1", "#89b4fa", "#cba6f7", "#ffffff", "#11111b"]
@@ -48,6 +50,7 @@ Scope {
         selScreen = "";
         sel = null;
         annotations = [];
+        history = [];
         mode = "select";
         capture.command = ["sh", "-c", captureScript, "sh", tmpDir, saveDir, stamp, ...Quickshell.screens.map(s => s.name)];
         capture.running = true;
@@ -80,11 +83,21 @@ Scope {
     }
 
     function undo() {
-        if (annotations.length > 0) annotations = annotations.slice(0, -1);
+        if (history.length === 0) return;
+        annotations = history[history.length - 1];
+        history = history.slice(0, -1);
     }
 
+    // Every change goes through here so it can be undone.
+    function setAnnotations(list) {
+        history = [...history, annotations];
+        annotations = list;
+    }
     function addAnnotation(a) {
-        annotations = [...annotations, a];
+        setAnnotations([...annotations, a]);
+    }
+    function removeAnnotation(i) {
+        setAnnotations(annotations.filter((_, j) => j !== i));
     }
 
     function finish() {

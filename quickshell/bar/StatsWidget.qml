@@ -15,6 +15,12 @@ BarModule {
     }
     function gib(kib) { return (kib / 1048576).toFixed(1); }
     function mib(bytes) { return Math.round(bytes / 1048576); }
+    // KiB → "812 KB" / "45.3 MB" / "1.2 GB"
+    function size(kib) {
+        if (kib >= 1048576) return (kib / 1048576).toFixed(1) + " GB";
+        if (kib >= 1024) return (kib / 1024).toFixed(kib >= 102400 ? 0 : 1) + " MB";
+        return Math.round(kib) + " KB";
+    }
     function temp(t) { return t >= 0 ? Math.round(t) + "°C" : ""; }
     function join(parts) { return parts.filter(p => p !== "").join(" · "); }
     function duration(sec) {
@@ -114,8 +120,8 @@ BarModule {
             RowLayout {
                 Layout.fillWidth: true
                 Text { Layout.fillWidth: true; text: "Process"; color: Theme.overlay0; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 2 }
-                Text { Layout.preferredWidth: 50; text: "CPU"; color: Theme.overlay0; horizontalAlignment: Text.AlignRight; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 2 }
-                Text { Layout.preferredWidth: 50; text: "RAM"; color: Theme.overlay0; horizontalAlignment: Text.AlignRight; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 2 }
+                ColumnHeader { label: "CPU"; current: SysStats.sortBy === "cpu"; onPicked: SysStats.sortBy = "cpu" }
+                ColumnHeader { label: "RAM"; Layout.preferredWidth: 64; current: SysStats.sortBy === "mem"; onPicked: SysStats.sortBy = "mem" }
             }
             Repeater {
                 model: SysStats.processes
@@ -124,7 +130,7 @@ BarModule {
                     Layout.fillWidth: true
                     Text { Layout.fillWidth: true; text: modelData.name; elide: Text.ElideRight; color: Theme.text; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 1 }
                     Text { Layout.preferredWidth: 50; text: modelData.cpu.toFixed(1) + "%"; color: Theme.subtext; horizontalAlignment: Text.AlignRight; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 1 }
-                    Text { Layout.preferredWidth: 50; text: modelData.mem.toFixed(1) + "%"; color: Theme.subtext; horizontalAlignment: Text.AlignRight; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 1 }
+                    Text { Layout.preferredWidth: 64; text: root.size(modelData.mem); color: Theme.subtext; horizontalAlignment: Text.AlignRight; font.family: Theme.fontFamily; font.pixelSize: Theme.fontSize - 1 }
                 }
             }
         }

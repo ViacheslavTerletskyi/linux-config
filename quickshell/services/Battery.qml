@@ -14,4 +14,10 @@ Singleton {
     readonly property bool charging: dev?.state === UPowerDeviceState.Charging
     readonly property bool plugged: !UPower.onBattery
     readonly property real secondsLeft: charging ? (dev?.timeToFull ?? 0) : (dev?.timeToEmpty ?? 0)
+
+    // Power mode via power-profiles-daemon.
+    readonly property int profile: PowerProfiles.profile
+    readonly property bool hasPerformance: PowerProfiles.hasPerformanceProfile
+    readonly property int degradation: PowerProfiles.degradationReason
+    function setProfile(p) { PowerProfiles.profile = p; }
 }
