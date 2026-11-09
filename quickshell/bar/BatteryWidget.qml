@@ -6,9 +6,10 @@ import qs.theme
 // Click: power mode popup. Hidden on machines without a laptop battery.
 BarModule {
     id: root
-    readonly property var icons: ["", "", "", "", ""]
-    readonly property string icon: Battery.charging ? ""
-        : Battery.plugged ? ""
+
+    readonly property var icons: ["", "", "", "", ""]
+    readonly property string icon: Battery.charging ? ""
+        : Battery.plugged ? ""
         : icons[Math.min(4, Math.floor(Battery.percent / 20))]
 
     visible: Battery.present
